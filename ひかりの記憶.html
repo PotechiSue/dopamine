@@ -346,17 +346,23 @@ const Sound = {
   ctx: null, out: null, on: true, buf: null,
   /** 最初のタップ/キー操作で呼ぶ（ブラウザの自動再生制限のため） */
   init() {
-    if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => { }); return; }
+    if (this.ctx) { if (this.ctx.state !== 'running') { this.ctx.resume().catch(() => { }); this.kick(); } return; }
     try {
+      // iPhone：マナーモード（消音スイッチ）中でもゲーム音を鳴らす（音のON/OFFはタイトルのボタンで切り替え）
+      try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) { }
       const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
       const c = this.ctx = new AC();
+      if (c.state !== 'running') c.resume().catch(() => { });
       const comp = c.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 6;
       this.out = c.createGain(); this.out.gain.value = 0.55; this.out.connect(comp); comp.connect(c.destination);
       const len = c.sampleRate; const b = c.createBuffer(1, len, c.sampleRate); const d = b.getChannelData(0);
       for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
       this.buf = b;
+      this.kick();
     } catch (e) { this.ctx = null; }
   },
+  /** iPhoneの音の制限を解除するため、タップの瞬間に無音を1回だけ鳴らす */
+  kick() { try { const c = this.ctx, s = c.createBufferSource(); s.buffer = c.createBuffer(1, 1, 22050); s.connect(c.destination); s.start(0); } catch (e) { } },
   hz: m => 440 * Math.pow(2, (m - 69) / 12),
   ready() { return this.on && this.ctx && this.ctx.state === 'running'; },
   /** 単音 f:周波数 d:長さ(秒) o:{type,vol,slide,delay,attack} */
@@ -883,12 +889,16 @@ const Core = {
     this.best = Store.get('best', 0); this.plays = Store.get('plays', 0);
     this.buildUI();
     BG.set(cfg.chapters[0].theme, true);
-    const unlock = () => Sound.init();
-    addEventListener('pointerdown', unlock, { capture: true, passive: true });
+    // 音の許可：iPhoneは「指で触れた瞬間」ではなく「指を離した瞬間・クリック・キー入力」でしか音を許可しない。
+    // 許可の出ない瞬間に音の準備を始めると、そのまま鳴らなくなることがあるので、許可の出るタイミングだけで準備・再開する
+    const unlock = e => { if (e.type === 'pointerdown' && e.pointerType !== 'mouse') return; Sound.init(); };
+    ['pointerdown', 'pointerup', 'touchend', 'click'].forEach(t => addEventListener(t, unlock, { capture: true, passive: true }));
+    if (/[?&]debug/.test(location.search)) { const d = document.createElement('div'); d.style.cssText = 'position:fixed;left:4px;bottom:4px;z-index:99999;background:#000c;color:#0f0;font:11px monospace;padding:4px 6px;border-radius:6px;pointer-events:none';
+      document.body.appendChild(d); setInterval(() => { d.textContent = `audio:${Sound.ctx ? Sound.ctx.state : 'none'} on:${Sound.on} session:${navigator.audioSession ? navigator.audioSession.type : '-'}`; }, 400); }
     addEventListener('keydown', unlock, { capture: true });
     addEventListener('keydown', e => this.onKey(e));
     addEventListener('resize', () => { FX.resize(); BG.resize(); cfg.onResize && cfg.onResize(); });
-    document.addEventListener('visibilitychange', () => { if (document.hidden) this.pause(); });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) this.pause(); else if (Sound.ctx && Sound.ctx.state !== 'running') Sound.ctx.resume().catch(() => { }); });
     if (cfg.setup) cfg.setup();
     this.showTitle();
     this._last = U.now(); requestAnimationFrame(t => this.frame(t));
