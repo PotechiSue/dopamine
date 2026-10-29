@@ -1159,11 +1159,12 @@ const Core = {
     const cfg = this.cfg;
     const url = cfg.url || (/^https?:$/.test(location.protocol) ? location.href.split('#')[0] : '');
     const text = cfg.shareText ? cfg.shareText(r) : `【${cfg.title}】${U.fmt(r.score)}点！`;
-    let q = 'https://twitter.com/intent/tweet?text=' + encodeURIComponent(text);
-    if (url) q += '&url=' + encodeURIComponent(url);
-    if (cfg.hashtags) q += '&hashtags=' + encodeURIComponent(cfg.hashtags);
-    if (cfg.via) q += '&via=' + encodeURIComponent(cfg.via);   // 「@作者さんから」と添えられる
-    return q;
+    // X任せで末尾にまとめて付けると区切りが分かりにくいので、本文の中で1行ずつ並べる：リンク／#ゲーム名／作者
+    const lines = [text, ''];
+    if (url) lines.push(url);
+    if (cfg.hashtags) lines.push('#' + cfg.hashtags);
+    if (cfg.via) lines.push('作者：@' + cfg.via);
+    return 'https://twitter.com/intent/tweet?text=' + encodeURIComponent(lines.join('\n'));
   },
   dexLine() { return `演出図鑑 ${Specials.foundCount()}/${Specials.total()}`; },
   handleError(e) {
